@@ -1,0 +1,175 @@
+# CS4105 Coursework P2 - Discover and Download
+# 10 Oct 2023
+# Saleem Bhatti, Stephen McQuistin
+
+# This specification is not quite(!) in ABNF format, as defined in:
+#   RFC5234(S) https://tools.ietf.org/html/rfc5234
+#
+# I have taken some practical shortcuts for ease of implementation (as you
+# will see) by referring to specific parts of the Java API, and using
+# some informal definitions, both with the aim of allowing some parts to be
+# implemented more quickly.
+#
+# The control-plane protocol MUST be implemented on IPv6 multicast.
+#
+# This specification describes only the control-plane protocol. There is no
+# real user-plane protocol.
+#
+# For the user plane your application will connect on <server-port>
+# (see below).
+#
+# For implementing a download capability, TCP MUST be used for the
+# file transfer.
+
+#### ####
+## General message format
+
+  <message> := ":" <header> ":" <payload> ":"
+
+  <header> := <identifier> ":" <serial-number> ":" <timestamp>
+    # Example of header, with all parts:
+    #
+    # saleem@my.host1.net:528491:20231011-174242.042
+
+  <identifier> :=  uid "@" fqdn
+    # uid as from Java's System.getProperty.("user.name")
+    # fqdn as from Java's InetAddress.getLocalHost().getCanonicalHostName();
+    # Examples:
+    #
+    #    saleem@my.host1.net
+    #    my-id@my.host2.net
+
+  <serial-number> := *DIGIT
+    # A non-zero, unsigned decimal number to help the sender identify / demux
+    # responses to messages: this value is used by a server in responses.
+    # Examples:
+    #
+    #  42
+    #  101
+    #  528491
+    #
+    # This could, for example, be a monotonically increasing number.
+
+
+  # A <response-id> would be used in a response messages to match requests to
+  # responses so that multiple requests can be outstanding to the same server.
+  <response-id> := <identifier> ":" <serial-number>
+    # <identifier> and <serial-number> as defined above.
+    # In any responses, a response-id uses the values of identifier and
+    # serial-number from the request. Examples below.
+
+  <timestamp> := <year> <month> <day> "-" <hours> <minutes> <seconds> "." <milliseconds>
+  <year> := 4DIGIT
+  <month> := 2DIGIT
+  <day> := 2DIGIT
+  <hour> := 2DIGIT
+  <minutes> := 2DIGIT
+  <seconds> := 2DIGIT
+  <milliseconds> := 3DIGIT
+    # As from Java's SimpleDateFormat(new String("yyyyMMdd-HHmmss.SSS"))
+    # year         has format yyyy, 4-digits.
+    # month        has format MM, 2-digits with leading zero if required.
+    # hour         has format HH, 2-digits with leading zero if required.
+    # minutes      has format mm, 2-digits with leading zero if required.
+    # seconds      has format ss, 2-digits with leading zero if required.
+    # milliseconds has format SSS, 3-digits with leading zeros if required.
+    #
+    # Examples:
+    #
+    #  20231013-174242.042
+    #  20231101-210000.000
+
+#### ####
+## General payload format
+
+  <payload> := <advertisement-message> / <search-message> / <download-message> 
+
+
+#### ####
+## R1: Discover -- Advertisement message
+
+  <advertisement-message> := "advertisement" ":" <server-port> : <services>
+    # Example of a complete advertisement message, with header:
+    #
+    #   :saleem@my.host1.net:528491:20231013-174242.042:advertisement:10123:search=none:
+
+  <server-port> := *DIGIT
+    # a non-zero, unsigned, 16-bit decimal number, on which this server
+    # listens for incoming connections, an ephemeral port as allocated
+    # by OS when ServerSocket() is created.
+
+  <services> := <service-name> "=" <service-status>
+    # The offered services and their capabilities.
+    # Example:
+    #
+    #   search=none
+
+  <service-name> := "search"
+
+  <service-status> := <search-status>
+
+  <search-status> = "none" / "path" / "path-filename"
+
+
+#### ####
+## R2: Search
+
+  <search-message> := <search-request> / <search-response>
+
+  <search-response> := <search-result> / <search-error>
+
+  <search-request> := "search-request" ":" <search-type> ":" <search-string>
+
+  <search-type> := "path" / "filename"
+    # path        an exact, full path (from root) to be matched.
+    # filename    a filename to be matched, in any part of the filespace.
+    # All matches are case-insensitive.
+
+  <search-string> = file-string
+    # file-string is any group of characters that can be used for a
+    # a filepath and filename on the School lab linux machines.
+
+    # Example of a complete search request, with header:
+    #
+    #   :saleem@my.host1.net:1001:20231013-170101.001:search-request:filename:hello_world.txt:
+
+  <search-result> := "search-result" : <response-id> : file-string
+    #
+    # file-string is any group of characters that can be used for a full
+    # filepath on the School lab linux machines.
+    # The id and serial-number in the response should match that of the
+    # request. For example, if the server srv@my.host3.net has the file:
+    #
+    #   /dir1/dir2/hello_world.txt
+    #
+    # Then a response to the search-request message above would be:
+    #
+    #   :srv@my.host3.net:1111:20231013-170112.123:search-result:saleem@my.host1.net:1001:/dir1/dir2/hello_world.txt:
+    #
+    # Note that the root, "/", here is the root_dir of the logical filespace
+    # exposed via the application, and not the local unix root directory!
+    #
+    # Searches of search-type "filename" could generate
+    # multiple results, and these should be sent in separate messages, but
+    # using the same response-id so they can be matched to the same request.
+
+  <search-error> := "search-error" ":" <response-id>
+    # The serial-number in the response should match that of the request.
+    # For example, if the server srv@my.host3.net does not have a match, then
+    # a response to the example request would be:
+    #
+    #   :srv@my.host3.net:1001:20231013-170112.123:search-error:saleem@my.host1.net:1001:
+
+
+#### ####
+## R3: Download -- TBD.
+# If you attempt this, please include a description of your design
+# and your definitions for the items below in your report.
+
+<download-message> := <download-request> / <download-response>
+
+<download-response> := <download-result> / <download-error>
+
+  # <download-request> := ...
+  # <download-result> := ...
+  # <download-error> := ...
